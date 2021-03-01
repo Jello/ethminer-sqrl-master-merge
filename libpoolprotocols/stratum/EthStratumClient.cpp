@@ -759,9 +759,10 @@ void EthStratumClient::processResponse(Json::Value& responseObject)
         cwarn << "Pool sent an invalid jsonrpc message...";
         cwarn << "Do not blame ethminer for this. Ask pool devs to honor http://www.jsonrpc.org/ "
                  "specifications ";
-        cwarn << "Disconnecting...";
-        m_io_service.post(m_io_strand.wrap(boost::bind(&EthStratumClient::disconnect, this)));
-        return;
+        //cwarn << "Disconnecting...";
+        //m_io_service.post(m_io_strand.wrap(boost::bind(&EthStratumClient::disconnect, this)));
+        cwarn << "Ignoring ";
+	return;
     }
 
 
