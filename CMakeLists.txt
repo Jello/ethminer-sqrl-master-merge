@@ -14,22 +14,23 @@ cable_configure_toolchain(DEFAULT cxx11)
 set(HUNTER_CONFIGURATION_TYPES Release CACHE STRING "Build type of Hunter packages")
 set(HUNTER_JOBS_NUMBER 6 CACHE STRING "Number of parallel builds used by Hunter")
 HunterGate(
-    URL "https://github.com/ruslo/hunter/archive/v0.23.112.tar.gz"
-    SHA1 "4b894e1d5d203f0cc9a77431dbb1b486ab6f4430"
+    URL "https://github.com/cpp-pm/hunter/archive/v0.23.267.tar.gz"
+    SHA1 "9c5c7fa6e17c2ae15dd922184bc7c51235aaae70"
     LOCAL
 )
 
 project(ethminer)
-set(PROJECT_VERSION 0.19.0)
+set(PROJECT_VERSION 0.19.0-sqrl-v1.7.0)
 
-cable_set_build_type(DEFAULT Release CONFIGURATION_TYPES Release RelWithDebInfo)
+cable_set_build_type(DEFAULT RelWithDebInfo CONFIGURATION_TYPES Release RelWithDebInfo)
 
-option(ETHASHCL "Build with OpenCL mining" ON)
-option(ETHASHCUDA "Build with CUDA mining" ON)
+option(ETHASHCL "Build with OpenCL mining" OFF)
+option(ETHASHCUDA "Build with CUDA mining" OFF)
 option(ETHASHCPU "Build with CPU mining (only for development)" OFF)
+option(ETHASHSQRL "Build with SQRL FPGA mining)" ON)
 option(ETHDBUS "Build with D-Bus support" OFF)
 option(APICORE "Build with API Server support" ON)
-option(BINKERN "Install AMD binary kernels" ON)
+option(BINKERN "Install AMD binary kernels" OFF)
 option(DEVBUILD "Log developer metrics" OFF)
 option(USE_SYS_OPENCL "Build with system OpenCL" OFF)
 
@@ -43,6 +44,9 @@ function(configureProject)
     endif()
     if (ETHASHCPU)
         add_definitions(-DETH_ETHASHCPU)
+    endif()
+    if (ETHASHSQRL)
+        add_definitions(-DETH_ETHASHSQRL)
     endif()
     if (ETHDBUS)
         add_definitions(-DETH_DBUS)
@@ -83,6 +87,7 @@ message("----------------------------------------------------------------- compo
 message("-- ETHASHCL         Build OpenCL components                      ${ETHASHCL}")
 message("-- ETHASHCUDA       Build CUDA components                        ${ETHASHCUDA}")
 message("-- ETHASHCPU        Build CPU components (only for development)  ${ETHASHCPU}")
+message("-- ETHASHSQRL       Build SQRL FPGA components                   ${ETHASHSQRL}")
 message("-- ETHDBUS          Build D-Bus components                       ${ETHDBUS}")
 message("-- APICORE          Build API Server components                  ${APICORE}")
 message("-- BINKERN          Install AMD binary kernels                   ${BINKERN}")
@@ -95,6 +100,12 @@ include(EthCompilerSettings)
 if(UNIX AND NOT APPLE)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
 endif()
+
+# ARM
+if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -latomic")
+endif()
+
 
 cable_add_buildinfo_library(PROJECT_NAME ${PROJECT_NAME})
 
@@ -114,6 +125,9 @@ if (ETHASHCUDA)
 endif ()
 if (ETHASHCPU)
     add_subdirectory(libethash-cpu)
+endif ()
+if (ETHASHSQRL)
+    add_subdirectory(libethash-sqrl)
 endif ()
 if (APICORE)
     add_subdirectory(libapicore)

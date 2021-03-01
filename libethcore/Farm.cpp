@@ -30,6 +30,10 @@
 #include <libethash-cpu/CPUMiner.h>
 #endif
 
+#if ETH_ETHASHSQRL
+#include <libethash-sqrl/SQRLMiner.h>
+#endif
+
 namespace dev
 {
 namespace eth
@@ -37,11 +41,12 @@ namespace eth
 Farm* Farm::m_this = nullptr;
 
 Farm::Farm(std::map<std::string, DeviceDescriptor>& _DevicesCollection,
-    FarmSettings _settings, CUSettings _CUSettings, CLSettings _CLSettings, CPSettings _CPSettings)
+    FarmSettings _settings, CUSettings _CUSettings, CLSettings _CLSettings, CPSettings _CPSettings, SQSettings _SQSettings)
   : m_Settings(std::move(_settings)),
     m_CUSettings(std::move(_CUSettings)),
     m_CLSettings(std::move(_CLSettings)),
     m_CPSettings(std::move(_CPSettings)),
+    m_SQSettings(std::move(_SQSettings)),
     m_io_strand(g_io_service),
     m_collectTimer(g_io_service),
     m_DevicesCollection(_DevicesCollection)
@@ -61,6 +66,7 @@ Farm::Farm(std::map<std::string, DeviceDescriptor>& _DevicesCollection,
         bool need_adlh = false;
 #endif
         bool need_nvmlh = false;
+	bool need_sqrlh = false;
 
         // Scan devices collection to identify which hw monitors to initialize
         for (auto it = m_DevicesCollection.begin(); it != m_DevicesCollection.end(); it++)
@@ -87,6 +93,10 @@ Farm::Farm(std::map<std::string, DeviceDescriptor>& _DevicesCollection,
                     continue;
                 }
             }
+	    if (it->second.subscriptionType == DeviceSubscriptionTypeEnum::Sqrl)
+	    {
+              need_sqrlh = true;
+	    }
         }
 
 #if defined(__linux)
@@ -144,6 +154,13 @@ Farm::Farm(std::map<std::string, DeviceDescriptor>& _DevicesCollection,
                 map_nvml_handle[uniqueId] = i;
             }
         }
+
+	if (need_sqrlh)
+	// TODO sqrlh = wrap_sqrl_create();
+        //if (sqrlh) 
+	{
+            // Build identification streams
+	}
     }
 
     // Initialize nonce_scrambler
@@ -212,6 +229,7 @@ void Farm::setWork(WorkPackage const& _newWp)
         m_currentEc.dagNumItems = _ec.full_dataset_num_items;
         m_currentEc.dagSize = ethash::get_full_dataset_size(_ec.full_dataset_num_items);
         m_currentEc.lightCache = _ec.light_cache;
+	m_currentEc.seed = ethash::calculate_epoch_seed(_newWp.epoch);
 
         for (auto const& miner : m_miners)
             miner->setEpoch(m_currentEc);
@@ -286,6 +304,15 @@ bool Farm::start()
                 minerTelemetry.prefix = "cp";
                 m_miners.push_back(std::shared_ptr<Miner>(
                     new CPUMiner(m_miners.size(), m_CPSettings, it->second)));
+            }
+#endif
+#if ETH_ETHASHSQRL
+
+            if (it->second.subscriptionType == DeviceSubscriptionTypeEnum::Sqrl)
+            {
+                minerTelemetry.prefix = "sq";
+                m_miners.push_back(std::shared_ptr<Miner>(
+                    new SQRLMiner(m_miners.size(), m_SQSettings, it->second, &m_telemetry)));
             }
 #endif
             if (minerTelemetry.prefix.empty())
@@ -437,6 +464,14 @@ void Farm::accountSolution(unsigned _minerIdx, SolutionAccountingEnum _accountin
         m_telemetry.miners.at(_minerIdx).solutions.tstamp = std::chrono::steady_clock::now();
         return;
     }
+    if (_accounting == SolutionAccountingEnum::Low)
+    {
+        m_telemetry.farm.solutions.low++;
+        m_telemetry.farm.solutions.tstamp = std::chrono::steady_clock::now();
+        m_telemetry.miners.at(_minerIdx).solutions.low++;
+        m_telemetry.miners.at(_minerIdx).solutions.tstamp = std::chrono::steady_clock::now();
+        return;
+    }
 }
 
 /**
@@ -493,14 +528,24 @@ void Farm::submitProofAsync(Solution const& _s)
     if (!m_Settings.noEval)
     {
         Result r = EthashAux::eval(_s.work.epoch, _s.work.header, _s.nonce);
-        if (r.value > _s.work.boundary)
+	// SQRL fixed difficulty for health check
+	if ( (r.value > h256("0x000001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")) && (r.value > _s.work.boundary))
         {
             accountSolution(_s.midx, SolutionAccountingEnum::Failed);
-            cwarn << "GPU " << _s.midx
+            cwarn << "Miner " << _s.midx
                   << " gave incorrect result. Lower overclocking values if it happens frequently.";
             return;
         }
-        m_onSolutionFound(Solution{_s.nonce, r.mixHash, _s.work, _s.tstamp, _s.midx});
+        if (r.value <= _s.work.boundary)
+        {
+          m_onSolutionFound(Solution{_s.nonce, r.mixHash, _s.work, _s.tstamp, _s.midx});
+	}
+	else
+       	{
+          // SQRL Fixed fifficulty share
+	  accountSolution(_s.midx, SolutionAccountingEnum::Low);
+	}
+	  
     }
     else
         m_onSolutionFound(_s);
@@ -624,7 +669,9 @@ void Farm::collectData(const boost::system::error_code& ec)
                     }
                 }
 #endif
-            }
+            } else if (hwInfo.deviceType == HwMonitorInfoType::SQRL) {
+              miner->getTelemetry(&tempC, &fanpcnt, &powerW);
+	    }
 
 
             // If temperature control has been enabled call

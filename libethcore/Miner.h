@@ -44,7 +44,8 @@ enum class DeviceTypeEnum
     Unknown,
     Cpu,
     Gpu,
-    Accelerator
+    Accelerator,
+    Fpga
 };
 
 enum class DeviceSubscriptionTypeEnum
@@ -52,8 +53,8 @@ enum class DeviceSubscriptionTypeEnum
     None,
     OpenCL,
     Cuda,
-    Cpu
-
+    Cpu,
+    Sqrl
 };
 
 enum class MinerType
@@ -61,7 +62,8 @@ enum class MinerType
     Mixed,
     CL,
     CUDA,
-    CPU
+    CPU,
+    SQRL 
 };
 
 enum class HwMonitorInfoType
@@ -69,7 +71,8 @@ enum class HwMonitorInfoType
     UNKNOWN,
     NVIDIA,
     AMD,
-    CPU
+    CPU,
+    SQRL
 };
 
 enum class ClPlatformTypeEnum
@@ -86,7 +89,8 @@ enum class SolutionAccountingEnum
     Accepted,
     Rejected,
     Wasted,
-    Failed
+    Failed,
+    Low,
 };
 
 struct MinerSettings
@@ -118,12 +122,42 @@ struct CPSettings : public MinerSettings
 {
 };
 
+// Holds settings for CPU Miner
+struct SQSettings : public MinerSettings
+{
+   vector<string> hosts;
+   double targetClk;
+   unsigned intensityN = 12;
+   unsigned intensityD  = 3;
+   unsigned patience = 1;
+   bool skipStallDetection = 1;
+   unsigned workDelay = 50000;
+   unsigned fkVCCINT = 0;  // 0 == no action
+   unsigned jcVCCINT = 0;  // 0 == no action
+   bool dieOnError = false;
+   unsigned dagMixers = 16;
+   unsigned autoTune = 0;// 0 - no auto-tune, 1 - just reach max stable freq, 2 - downclock till low errror rate, 3 - tune intensity, 4- downclock voltage
+   unsigned tuneTime = 60;
+   unsigned tuneMaxClk = 600;
+   bool showHBMStats = true;
+   bool forceDAG = false; 
+   bool skipDAG = false; // DEV - 'fake' building dag to test hashrate only
+   vector<uint8_t> exclude;
+   unsigned axiTimeoutMs = 2000;
+   vector<uint8_t> tuneExclude;
+   string tuneFile = "tune.txt";
+   unsigned tuneMaxCoreTemp = 85;
+   unsigned tuneMaxHBMtemp = 80;
+   double tuneStabilityThreshold = 0.85; 
+};
+
 struct SolutionAccountType
 {
     unsigned accepted = 0;
     unsigned rejected = 0;
     unsigned wasted = 0;
     unsigned failed = 0;
+    unsigned low = 0;
     std::chrono::steady_clock::time_point tstamp = std::chrono::steady_clock::now();
     string str()
     {
@@ -134,6 +168,8 @@ struct SolutionAccountType
             _ret.append(":R" + to_string(rejected));
         if (failed)
             _ret.append(":F" + to_string(failed));
+        if (low)
+            _ret.append(":L" + to_string(low));
         return _ret;
     };
 };
@@ -145,9 +181,9 @@ struct HwSensorsType
     double powerW = 0.0;
     string str()
     {
-        string _ret = to_string(tempC) + "C " + to_string(fanP) + "%";
+        string _ret = to_string(tempC) + "C " + to_string(fanP) + "MHz";
         if (powerW)
-            _ret.append(" " + boost::str(boost::format("%0.2f") % powerW) + "W");
+            _ret.append(boost::str(boost::format(" %0.2fV") % powerW));
         return _ret;
     };
 };
@@ -200,6 +236,11 @@ struct DeviceDescriptor
     unsigned int cuComputeMinor;
 
     int cpCpuNumer;   // For CPU
+
+    // For SQRL FPGAs
+    string sqHost;
+    unsigned int sqPort;
+    double targetClk;
 };
 
 struct HwMonitorInfo
@@ -381,6 +422,8 @@ public:
     HwMonitorInfo hwmonInfo() { return m_hwmoninfo; }
 
     void setHwmonDeviceIndex(int i) { m_hwmoninfo.deviceIndex = i; }
+
+    virtual void getTelemetry(unsigned int *tempC, unsigned int *fanprc, unsigned int *powerW);
 
     /**
      * @brief Kick an asleep miner.
